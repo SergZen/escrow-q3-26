@@ -63,6 +63,7 @@ impl<'info> Make<'info> {
             receive: receive,
             bump: bumps.escrow,
             expiration: expiration,
+            created_at: Clock::get()?.unix_timestamp,
         });
         Ok(())
     }

@@ -10,4 +10,5 @@ pub struct Escrow {
     pub receive: u64,
     pub bump: u8,
     pub expiration: i64,
+    pub created_at: i64,
 }

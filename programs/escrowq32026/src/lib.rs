@@ -3,8 +3,6 @@ pub mod error;
 pub mod instructions;
 pub mod state;
 
-use anchor_lang::prelude::*;
-
 pub use constants::*;
 pub use instructions::*;
 pub use state::*;
@@ -38,10 +36,21 @@ pub mod escrowq32026 {
     }
 
     //take instruction
-    //TODO:
+    #[instruction(discriminator = 1)]
+    pub fn take(
+        ctx: Context<Take>,
+    ) -> Result<()> {
+        ctx.accounts.transfer()?;
+        ctx.accounts.withdraw_and_close_vault()
+    }
 
     #[instruction(discriminator = 2)]
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
         ctx.accounts.refund_and_close_vault()
+    }
+
+    #[instruction(discriminator = 3)]
+    pub fn update(ctx: Context<Update>, expiration: i64) -> Result<()> {
+        ctx.accounts.update_escrow(expiration)
     }
 }
