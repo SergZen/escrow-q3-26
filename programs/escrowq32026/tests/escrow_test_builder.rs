@@ -24,7 +24,7 @@ use {
 
 pub struct EscrowTestBuilder {
     program_id: Pubkey,
-    program: LiteSVM,
+    svm: LiteSVM,
     maker: Keypair,
     taker: Option<Keypair>,
     mint_a: Option<Pubkey>,
@@ -43,22 +43,25 @@ impl EscrowTestBuilder {
     pub fn new() -> Self {
         let program_id = escrowq32026::id();
 
-        let mut program = LiteSVM::new();
+        let mut svm = LiteSVM::new();
         let maker = Keypair::new();
 
-        program
+        svm
             .airdrop(&maker.pubkey(), 30_000_000_000)
             .expect("Failed to airdrop SOL to maker");
 
-        let program_bytes = include_bytes!(concat!(
-            env!("CARGO_TARGET_TMPDIR"),
-            "/../deploy/escrowq32026.so"
-        ));
-        program.add_program(program_id, program_bytes).unwrap();
+        let program_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/escrowq32026.so");
+        assert!(
+            program_path.exists(),
+            "program binary not found at {}. Run cargo-build-sbf first.",
+            program_path.display()
+        );
+        svm.add_program_from_file(program_id, program_path).unwrap();
 
         Self {
             program_id,
-            program,
+            svm,
             maker,
             taker: None,
             mint_a: None,
@@ -77,14 +80,14 @@ impl EscrowTestBuilder {
     /// Create two mints (Mint A and Mint B) with 6 decimal places and the maker as the authority
     /// This done using litesvm-token's CreateMint utility which creates the mint in the LiteSVM environment
     pub fn create_mints(mut self) -> Self {
-        let mint_a = CreateMint::new(&mut self.program, &self.maker)
+        let mint_a = CreateMint::new(&mut self.svm, &self.maker)
             .decimals(6)
             .authority(&self.maker.pubkey())
             .send()
             .unwrap();
         msg!("Mint A: {}\n", mint_a);
 
-        let mint_b = CreateMint::new(&mut self.program, &self.maker)
+        let mint_b = CreateMint::new(&mut self.svm, &self.maker)
             .decimals(6)
             .authority(&self.maker.pubkey())
             .send()
@@ -101,7 +104,7 @@ impl EscrowTestBuilder {
     pub fn create_maker_ata_a(mut self) -> Self {
         let mint_a = self.mint_a.expect("Mint A not created");
         let maker_ata_a =
-            CreateAssociatedTokenAccount::new(&mut self.program, &self.maker, &mint_a)
+            CreateAssociatedTokenAccount::new(&mut self.svm, &self.maker, &mint_a)
                 .owner(&self.maker.pubkey())
                 .send()
                 .unwrap();
@@ -117,7 +120,7 @@ impl EscrowTestBuilder {
     pub fn create_maker_ata_b(mut self) -> Self {
         let mint_b = self.mint_b.expect("Mint B not created");
         let maker_ata_b =
-            CreateAssociatedTokenAccount::new(&mut self.program, &self.maker, &mint_b)
+            CreateAssociatedTokenAccount::new(&mut self.svm, &self.maker, &mint_b)
                 .owner(&self.maker.pubkey())
                 .send()
                 .unwrap();
@@ -132,7 +135,7 @@ impl EscrowTestBuilder {
     /// This is done using litesvm-token's MintTo utility
     pub fn mint_to_maker_ata_a(mut self, amount: u64) -> Self {
         MintTo::new(
-            &mut self.program,
+            &mut self.svm,
             &self.maker,
             &self.mint_a.unwrap(),
             &self.maker_ata_a.unwrap(),
@@ -148,7 +151,7 @@ impl EscrowTestBuilder {
     /// This is done using litesvm-token's MintTo utility
     pub fn mint_to_taker_ata_b(mut self, amount: u64) -> Self {
         MintTo::new(
-            &mut self.program,
+            &mut self.svm,
             &self.maker,
             &self.mint_b.unwrap(),
             &self.taker_ata_b.unwrap(),
@@ -162,7 +165,7 @@ impl EscrowTestBuilder {
 
     pub fn setup_taker(mut self) -> Self {
         let taker = Keypair::new();
-        self.program
+        self.svm
             .airdrop(&taker.pubkey(), 20_000_000_000)
             .expect("Failed to airdrop SOL to taker");
 
@@ -175,12 +178,12 @@ impl EscrowTestBuilder {
         let mint_a = self.mint_a.expect("Mint A not created");
         let mint_b = self.mint_b.expect("Mint B not created");
 
-        let taker_ata_a = CreateAssociatedTokenAccount::new(&mut self.program, taker, &mint_a)
+        let taker_ata_a = CreateAssociatedTokenAccount::new(&mut self.svm, taker, &mint_a)
             .owner(&taker.pubkey())
             .send()
             .unwrap();
 
-        let taker_ata_b = CreateAssociatedTokenAccount::new(&mut self.program, taker, &mint_b)
+        let taker_ata_b = CreateAssociatedTokenAccount::new(&mut self.svm, taker, &mint_b)
             .owner(&taker.pubkey())
             .send()
             .unwrap();
@@ -192,10 +195,10 @@ impl EscrowTestBuilder {
 
     pub fn advance_time(mut self, seconds: i64) -> Self {
         use anchor_lang::prelude::Clock;
-        let mut clock = self.program.get_sysvar::<Clock>();
+        let mut clock = self.svm.get_sysvar::<Clock>();
         clock.unix_timestamp += seconds;
 
-        self.program.set_sysvar::<Clock>(&clock);
+        self.svm.set_sysvar::<Clock>(&clock);
         self
     }
 
@@ -242,11 +245,11 @@ impl EscrowTestBuilder {
 
         // Create and send the transaction containing the "Make" instruction
         let message = Message::new(&[make_ix], Some(&self.maker.pubkey()));
-        let recent_blockhash = self.program.latest_blockhash();
+        let recent_blockhash = self.svm.latest_blockhash();
         let transaction = Transaction::new(&[&self.maker], message, recent_blockhash);
 
         // Send the transaction and capture the result
-        let tx = self.program.send_transaction(transaction).unwrap();
+        let tx = self.svm.send_transaction(transaction).unwrap();
 
         // Log transaction details
         msg!("\n\nMake transaction successful");
@@ -284,12 +287,12 @@ impl EscrowTestBuilder {
 
         // Create and send the transaction containing the "Take" instruction
         let message = Message::new(&[take_ix], Some(&taker.pubkey()));
-        let recent_blockhash = self.program.latest_blockhash();
+        let recent_blockhash = self.svm.latest_blockhash();
 
         let transaction = Transaction::new(&[&taker], message, recent_blockhash);
 
         // Send the transaction and capture the result
-        let tx = self.program.send_transaction(transaction);
+        let tx = self.svm.send_transaction(transaction);
 
         // Log transaction details
         match &tx {
@@ -328,12 +331,12 @@ impl EscrowTestBuilder {
 
         // Create and send the transaction containing the "Refund" instruction
         let message = Message::new(&[refund_ix], Some(&self.maker.pubkey()));
-        let recent_blockhash = self.program.latest_blockhash();
+        let recent_blockhash = self.svm.latest_blockhash();
 
         let transaction = Transaction::new(&[&self.maker], message, recent_blockhash);
 
         // Send the transaction and capture the result
-        let tx = self.program.send_transaction(transaction);
+        let tx = self.svm.send_transaction(transaction);
 
         // Log transaction details
         match &tx {
@@ -380,11 +383,11 @@ impl EscrowTestBuilder {
 
         // Create and send the transaction containing the "Update" instruction
         let message = Message::new(&[update_ix], Some(&self.maker.pubkey()));
-        let recent_blockhash = self.program.latest_blockhash();
+        let recent_blockhash = self.svm.latest_blockhash();
         let transaction = Transaction::new(&[&self.maker], message, recent_blockhash);
 
         // Send the transaction and capture the result
-        let tx = self.program.send_transaction(transaction).unwrap();
+        let tx = self.svm.send_transaction(transaction).unwrap();
 
         // Log transaction details
         msg!("\n\nUpdate transaction successful");
@@ -397,18 +400,18 @@ impl EscrowTestBuilder {
     }
 
     pub fn get_vault_data(&self) -> spl_token::state::Account {
-        let vault_account = self.program.get_account(&self.vault.unwrap()).unwrap();
+        let vault_account = self.svm.get_account(&self.vault.unwrap()).unwrap();
         spl_token::state::Account::unpack(&vault_account.data).unwrap()
     }
 
     pub fn get_escrow_data(&self) -> Escrow {
-        let escrow_account = self.program.get_account(&self.escrow.unwrap()).unwrap();
+        let escrow_account = self.svm.get_account(&self.escrow.unwrap()).unwrap();
         Escrow::try_deserialize(&mut escrow_account.data.as_ref()).unwrap()
     }
 
     pub fn get_maker_ata_a_data(&self) -> spl_token::state::Account {
         let account = self
-            .program
+            .svm
             .get_account(&self.maker_ata_a.unwrap())
             .unwrap();
         spl_token::state::Account::unpack(&account.data).unwrap()
@@ -416,7 +419,7 @@ impl EscrowTestBuilder {
 
     pub fn get_maker_ata_b_data(&self) -> spl_token::state::Account {
         let account = self
-            .program
+            .svm
             .get_account(&self.maker_ata_b.unwrap())
             .unwrap();
         spl_token::state::Account::unpack(&account.data).unwrap()
@@ -424,7 +427,7 @@ impl EscrowTestBuilder {
 
     pub fn get_taker_ata_a_data(&self) -> spl_token::state::Account {
         let account = self
-            .program
+            .svm
             .get_account(&self.taker_ata_a.unwrap())
             .unwrap();
         spl_token::state::Account::unpack(&account.data).unwrap()
@@ -432,7 +435,7 @@ impl EscrowTestBuilder {
 
     pub fn get_taker_ata_b_data(&self) -> spl_token::state::Account {
         let account = self
-            .program
+            .svm
             .get_account(&self.taker_ata_b.unwrap())
             .unwrap();
         spl_token::state::Account::unpack(&account.data).unwrap()
