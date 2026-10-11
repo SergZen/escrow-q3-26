@@ -39,8 +39,14 @@ pub struct Refund<'info> {
 impl<'info> Refund<'info> {
     //Refund tokens from vault to maker and close vault
     pub fn refund_and_close_vault(&mut self) -> Result<()> {
+        let expired_time = self
+            .escrow
+            .created_at
+            .checked_add(self.escrow.expiration)
+            .ok_or(EscrowError::Overflow)?;
+
         require!(
-            Clock::get()?.unix_timestamp >= self.escrow.created_at + self.escrow.expiration,
+            Clock::get()?.unix_timestamp >= expired_time,
             EscrowError::EscrowNotExpired
         );
 

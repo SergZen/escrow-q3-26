@@ -67,8 +67,14 @@ pub struct Take<'info> {
 
 impl<'info> Take<'info> {
     pub fn transfer(&mut self) -> Result<()> {
+        let expired_time = self
+            .escrow
+            .created_at
+            .checked_add(self.escrow.expiration)
+            .ok_or(EscrowError::Overflow)?;
+
         require!(
-            Clock::get()?.unix_timestamp <= self.escrow.created_at + self.escrow.expiration,
+            Clock::get()?.unix_timestamp <= expired_time,
             EscrowError::EscrowExpired
         );
 

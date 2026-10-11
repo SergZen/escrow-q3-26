@@ -6,4 +6,6 @@ pub enum EscrowError {
     EscrowExpired,
     #[msg("The escrow has not expired yet")]
     EscrowNotExpired,
+    #[msg("Overflow occurred during arithmetic operation.")]
+    Overflow,
 }
